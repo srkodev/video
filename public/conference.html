@@ -2,21 +2,32 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Visio Conférence - Caméra Off par Défaut</title>
+  <title>Visio Conférence</title>
   <!-- Tailwind CSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="icon" type="image/x-icon" href="/video/public/favicon.ico">
+
   <!-- FontAwesome pour les icônes -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link 
+    rel="stylesheet" 
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    crossorigin="anonymous" 
+    referrerpolicy="no-referrer" 
+  />
+
   <!-- Tippy.js pour les tooltips -->
-  <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/dist/tippy.css">
+  <link 
+    rel="stylesheet" 
+    href="https://unpkg.com/tippy.js@6/dist/tippy.css">
   <script src="https://unpkg.com/@popperjs/core@2"></script>
   <script src="https://unpkg.com/tippy.js@6"></script>
+
   <!-- Interact.js pour le drag & drop -->
   <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+
   <!-- Client Socket.io -->
   <script src="/socket.io/socket.io.js"></script>
+
   <style>
     .control-btn {
       width: 50px;
@@ -80,16 +91,6 @@
       z-index: 100;
       transition: box-shadow 0.3s;
     }
-    #fullscreenScreenBtn {
-      position: absolute;
-      top: 0.25rem;
-      right: 0.25rem;
-      background-color: rgba(0,0,0,0.5);
-      border-radius: 50%;
-      padding: 0.25rem;
-      cursor: pointer;
-      z-index: 10;
-    }
     #localScreenWrapper {
       position: fixed;
       bottom: 1rem;
@@ -101,7 +102,8 @@
     }
     .modal {
       position: fixed;
-      top: 0; left: 0;
+      top: 0; 
+      left: 0;
       width: 100%;
       height: 100%;
       background: rgba(0,0,0,0.5);
@@ -116,23 +118,67 @@
       width: 90%;
       max-width: 500px;
     }
+    /* Plein écran d’un élément */
+    .fullscreen {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      z-index: 9999 !important;
+      border-radius: 0 !important;
+    }
   </style>
 </head>
 <body class="bg-gray-900 text-white">
   <div class="min-h-screen flex flex-col relative">
     <!-- En-tête -->
     <header class="bg-gray-800 p-4 text-center">
-      <h1 class="text-2xl font-bold">Visio Conférence - Caméra Off par Défaut</h1>
+      <h1 class="text-2xl font-bold">Visio Conférence</h1>
     </header>
 
-    <!-- Conteneur principal pour les flux distants -->
-    <main id="remoteMain" class="flex-1 p-4">
-      <div id="remoteVideos" class="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-        <!-- Vidéos distants ajoutées ici -->
+    <!-- Conteneur principal: vidéos + partages d'écran + chat -->
+    <main class="flex-1 p-4 flex flex-row gap-4">
+      
+      <!-- Section pour les caméras distantes -->
+      <div class="flex-1 overflow-auto">
+        <h2 class="text-xl mb-2 font-semibold">Caméras Distantes</h2>
+        <div id="remoteVideos" class="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <!-- Vidéos distantes ajoutées ici -->
+        </div>
+
+        <hr class="my-4 border-gray-700"/>
+
+        <!-- Section pour les partages d'écran distants -->
+        <h2 class="text-xl mb-2 font-semibold">Partages d'écran Distants</h2>
+        <div id="remoteScreens" class="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <!-- Écrans distants ajoutés ici -->
+        </div>
       </div>
+
+      <!-- Barre latérale: Chat -->
+      <aside class="w-80 bg-gray-800 p-4 rounded-lg flex flex-col">
+        <h2 class="text-xl mb-2 font-semibold">Chat</h2>
+        <div id="messages" class="flex-1 overflow-auto border border-gray-700 rounded p-2 mb-2">
+          <!-- Messages de chat -->
+        </div>
+        <div class="flex gap-2">
+          <input 
+            id="chatInput" 
+            type="text" 
+            class="flex-1 p-2 rounded bg-gray-700" 
+            placeholder="Tapez un message..."
+          />
+          <button 
+            id="chatSend" 
+            class="bg-blue-600 px-4 py-2 rounded">
+            Envoyer
+          </button>
+        </div>
+      </aside>
     </main>
 
-    <!-- Barre de contrôle -->
+    <!-- Barre de contrôle (bas) -->
     <footer class="bg-gray-800 p-4 flex flex-wrap justify-center gap-4">
       <!-- Bouton caméra (défaut rouge, inactive) -->
       <button id="toggleCamera" class="control-btn bg-red-500 rounded-full" data-tippy-content="Activer/Désactiver la caméra">
@@ -169,10 +215,8 @@
     <div id="muteOverlay" class="overlay-small hidden">Muted</div>
   </div>
 
-  <!-- Cadre dédié au partage d'écran de l'utilisateur -->
+  <!-- Cadre dédié au partage d'écran de l'utilisateur local -->
   <div id="localScreenWrapper" class="draggable video-card">
-    <!-- Bouton plein écran pour le partage d'écran -->
-    <div id="fullscreenScreenBtn" title="Plein écran"><i class="fa-solid fa-expand fa-lg"></i></div>
     <video id="localScreen" autoplay playsinline class="w-full h-full object-cover hidden"></video>
     <div id="screenPlaceholder" class="video-placeholder">Partage d'écran non actif</div>
   </div>
@@ -200,6 +244,7 @@
     </div>
   </div>
 
+  <!-- Notre script principal -->
   <script src="js/conference.js"></script>
 </body>
 </html>
