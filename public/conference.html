@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Visio Conférence - Caméra Off par Défaut</title>
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" type="image/x-icon" href="/video/public/favicon.ico">
+  <!-- FontAwesome pour les icônes -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- Tippy.js pour les tooltips -->
+  <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/dist/tippy.css">
+  <script src="https://unpkg.com/@popperjs/core@2"></script>
+  <script src="https://unpkg.com/tippy.js@6"></script>
+  <!-- Interact.js pour le drag & drop -->
+  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+  <!-- Client Socket.io -->
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    .control-btn {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.3s;
+    }
+    .overlay-full {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      font-weight: bold;
+      color: #f87171;
+      pointer-events: none;
+    }
+    .overlay-small {
+      position: absolute;
+      bottom: 5px;
+      right: 5px;
+      background-color: rgba(0,0,0,0.6);
+      padding: 3px 6px;
+      font-size: 0.8rem;
+      border-radius: 3px;
+      color: #f87171;
+      pointer-events: none;
+    }
+    .video-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      background-color: #1F2937;
+      color: #9CA3AF;
+      font-size: 1rem;
+    }
+    .video-card {
+      position: relative;
+      background: #000;
+      border-radius: 0.5rem;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .draggable {
+      touch-action: none;
+      cursor: move;
+    }
+    #localStreamWrapper {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      z-index: 100;
+      transition: box-shadow 0.3s;
+    }
+    #fullscreenScreenBtn {
+      position: absolute;
+      top: 0.25rem;
+      right: 0.25rem;
+      background-color: rgba(0,0,0,0.5);
+      border-radius: 50%;
+      padding: 0.25rem;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #localScreenWrapper {
+      position: fixed;
+      bottom: 1rem;
+      left: 1rem;
+      z-index: 100;
+      display: none;
+      width: 480px;
+      height: 270px;
+    }
+    .modal {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      background: #1F2937;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      width: 90%;
+      max-width: 500px;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div class="min-h-screen flex flex-col relative">
+    <!-- En-tête -->
+    <header class="bg-gray-800 p-4 text-center">
+      <h1 class="text-2xl font-bold">Visio Conférence - Caméra Off par Défaut</h1>
+    </header>
+
+    <!-- Conteneur principal pour les flux distants -->
+    <main id="remoteMain" class="flex-1 p-4">
+      <div id="remoteVideos" class="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        <!-- Vidéos distants ajoutées ici -->
+      </div>
+    </main>
+
+    <!-- Barre de contrôle -->
+    <footer class="bg-gray-800 p-4 flex flex-wrap justify-center gap-4">
+      <!-- Bouton caméra (défaut rouge, inactive) -->
+      <button id="toggleCamera" class="control-btn bg-red-500 rounded-full" data-tippy-content="Activer/Désactiver la caméra">
+        <i id="cameraOn" class="fa-solid fa-video hidden"></i>
+        <i id="cameraOff" class="fa-solid fa-video-slash fa-xl"></i>
+      </button>
+      <!-- Bouton micro (gris par défaut, passe en rouge quand mute) -->
+      <button id="toggleMicrophone" class="control-btn bg-gray-700 rounded-full" data-tippy-content="Activer/Désactiver le micro">
+        <i id="microphoneOn" class="fa-solid fa-microphone fa-xl"></i>
+        <i id="microphoneOff" class="fa-solid fa-microphone-slash fa-xl hidden"></i>
+      </button>
+      <!-- Bouton partage d'écran (gris par défaut) -->
+      <button id="shareScreen" class="control-btn bg-gray-700 rounded-full" data-tippy-content="Partager l'écran">
+        <i id="shareScreenIcon" class="fa-solid fa-desktop fa-xl"></i>
+      </button>
+      <!-- Bouton paramètres (gris par défaut) -->
+      <button id="settings" class="control-btn bg-gray-700 rounded-full" data-tippy-content="Configurer vos périphériques">
+        <i id="settingsIcon" class="fa-solid fa-cog fa-xl"></i>
+      </button>
+      <!-- Bouton Quit Room (gris par défaut) -->
+      <button id="quitRoom" class="control-btn bg-gray-700 rounded-full" data-tippy-content="Quitter la room">
+        <i class="fa-solid fa-sign-out-alt fa-xl"></i>
+      </button>
+    </footer>
+  </div>
+
+  <!-- Cadre dédié au flux local de la caméra -->
+  <div id="localStreamWrapper" class="draggable video-card" style="width:320px; height:240px;">
+    <video id="localVideo" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+    <div id="localPlaceholder" class="video-placeholder">Caméra non disponible</div>
+    <!-- Overlay complet pour "Caméra off" -->
+    <div id="cameraOffOverlay" class="overlay-full hidden">Caméra off</div>
+    <!-- Overlay réduit pour "Muted" -->
+    <div id="muteOverlay" class="overlay-small hidden">Muted</div>
+  </div>
+
+  <!-- Cadre dédié au partage d'écran de l'utilisateur -->
+  <div id="localScreenWrapper" class="draggable video-card">
+    <!-- Bouton plein écran pour le partage d'écran -->
+    <div id="fullscreenScreenBtn" title="Plein écran"><i class="fa-solid fa-expand fa-lg"></i></div>
+    <video id="localScreen" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+    <div id="screenPlaceholder" class="video-placeholder">Partage d'écran non actif</div>
+  </div>
+
+  <!-- Modal pour la configuration des périphériques -->
+  <div id="deviceModal" class="modal">
+    <div class="modal-content">
+      <h2 class="text-xl mb-4">Paramètres des périphériques</h2>
+      <div class="mb-2">
+        <label for="videoSelect" class="block mb-1">Caméra :</label>
+        <select id="videoSelect" class="w-full p-2 rounded bg-gray-700 text-white"></select>
+      </div>
+      <div class="mb-2">
+        <label for="audioSelect" class="block mb-1">Microphone :</label>
+        <select id="audioSelect" class="w-full p-2 rounded bg-gray-700 text-white"></select>
+      </div>
+      <div class="mb-2">
+        <label for="speakerSelect" class="block mb-1">Haut-parleur :</label>
+        <select id="speakerSelect" class="w-full p-2 rounded bg-gray-700 text-white"></select>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button id="closeModal" class="px-4 py-2 bg-red-500 rounded">Annuler</button>
+        <button id="saveDevices" class="px-4 py-2 bg-green-500 rounded">Sauvegarder</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/conference.js"></script>
+</body>
+</html>
