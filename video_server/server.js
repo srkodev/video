@@ -1,103 +1,144 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
 
-const PORT = process.env.PORT || 3000;
+// Configuration du serveur Socket.io avec CORS pour développement
+const io = new Server(server, {
+  cors: { origin: '*' }
+});
 
-// Servir les fichiers statiques
-app.use(express.static(path.join(__dirname, '../public')));
+// Servir les fichiers React après build (Production)
+app.use(express.static(path.join(__dirname, '../visio-client/build')));
 
-// Structures de données
-let rooms = {};         // roomID -> [liste des socket.id]
-let socketToRoom = {};  // socket.id -> roomID
-let socketToName = {};  // socket.id -> nom
-let micStatus = {};     // socket.id -> 'on'/'off'
-let videoStatus = {};   // socket.id -> 'on'/'off'
+// Route pour servir React
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../visio-client/build', 'index.html'));
+});
+
+// Stockage des utilisateurs par salle
+const rooms = {}; 
+// Format: rooms[roomName] = { socketId: { name: 'Pseudo', isSharing: false, speaking: false, volume: 1 } }
 
 io.on('connection', socket => {
-  console.log(`Nouvelle connexion: ${socket.id}`);
+  console.log(`Client connecté: ${socket.id}`);
 
-  socket.on('join-room', (roomId, userName) => {
-    socket.join(roomId);
-    socketToRoom[socket.id] = roomId;
-    socketToName[socket.id] = userName || 'Utilisateur';
-    micStatus[socket.id] = 'on';
-    videoStatus[socket.id] = 'on';
+  // Rejoindre une salle avec un pseudo
+  socket.on('join', ({ room, name }) => {
+    socket.join(room);
 
-    if (rooms[roomId]) {
-      rooms[roomId].push(socket.id);
-      // Informer les autres participants
-      socket.to(roomId).emit('user-joined', socket.id, socketToName[socket.id]);
-      // Informer le nouvel arrivant des gens déjà présents
-      io.to(socket.id).emit('room-users', rooms[roomId].filter(id => id !== socket.id));
-    } else {
-      // Nouvelle salle
-      rooms[roomId] = [socket.id];
-      io.to(socket.id).emit('room-users', []);
+    if (!rooms[room]) rooms[room] = {};
+    rooms[room][socket.id] = { 
+      name: name, 
+      isSharing: false, 
+      speaking: false, 
+      volume: 1 
+    };
+
+    // Envoyer la liste des utilisateurs déjà présents
+    const usersInRoom = Object.keys(rooms[room])
+      .filter(id => id !== socket.id)
+      .map(id => ({
+        id,
+        name: rooms[room][id].name,
+        isSharing: rooms[room][id].isSharing
+      }));
+      
+    socket.emit('roomUsers', usersInRoom);
+
+    // Notifier les autres qu'un utilisateur a rejoint
+    socket.to(room).emit('userJoined', { id: socket.id, name });
+    console.log(`${name} a rejoint la salle ${room}`);
+  });
+
+  // Relayer les signaux WebRTC entre pairs
+  socket.on('signal', ({ to, data }) => {
+    io.to(to).emit('signal', { from: socket.id, data });
+  });
+
+  // Gestion des messages de chat
+  socket.on('chatMessage', message => {
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        const username = rooms[room][socket.id].name;
+        io.in(room).emit('chatMessage', { from: username, message });
+        break;
+      }
     }
-    // Nombre d’utilisateurs
-    io.to(roomId).emit('user-count', rooms[roomId].length);
-    console.log(`${userName} a rejoint la room ${roomId}`);
   });
 
-  // Réception message chat
-  socket.on('chat-message', (message, userName) => {
-    const roomId = socketToRoom[socket.id];
-    if (roomId) {
-      io.to(roomId).emit('chat-message', message, userName, new Date().toLocaleTimeString());
+  // Détection de parole
+  socket.on('speaking', ({ speaking }) => {
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        rooms[room][socket.id].speaking = speaking;
+        socket.to(room).emit('speaking', { id: socket.id, speaking });
+        break;
+      }
     }
   });
 
-  // Toggle audio/vidéo
-  socket.on('toggle-media', (mediaType, state) => {
-    if (mediaType === 'audio') {
-      micStatus[socket.id] = state;
-    } else if (mediaType === 'video') {
-      videoStatus[socket.id] = state;
+  // Gestion du volume
+  socket.on('setVolume', ({ volume }) => {
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        rooms[room][socket.id].volume = volume;
+        socket.to(room).emit('volumeChange', { id: socket.id, volume });
+        break;
+      }
     }
-    // Notifier la room
-    socket.to(socketToRoom[socket.id]).emit('media-toggled', socket.id, mediaType, state);
   });
 
-  // Signaling WebRTC
-  socket.on('video-offer', (offer, targetId) => {
-    io.to(targetId).emit('video-offer', offer, socket.id, socketToName[socket.id]);
-  });
-  socket.on('video-answer', (answer, targetId) => {
-    io.to(targetId).emit('video-answer', answer, socket.id);
-  });
-  socket.on('new-ice-candidate', (candidate, targetId) => {
-    io.to(targetId).emit('new-ice-candidate', candidate, socket.id);
-  });
-
-  // Quitter la room
-  socket.on('leave-room', (roomId) => {
-    socket.leave(roomId);
-    // On émet manuellement comme s’il s’était déconnecté
-    socket.disconnect();
+  // Début du partage d’écran
+  socket.on('startShare', () => {
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        rooms[room][socket.id].isSharing = true;
+        socket.to(room).emit('userStartedSharing', { id: socket.id });
+        break;
+      }
+    }
   });
 
-  // Déconnexion
+  // Fin du partage d’écran
+  socket.on('stopShare', () => {
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        rooms[room][socket.id].isSharing = false;
+        socket.to(room).emit('userStoppedSharing', { id: socket.id });
+        break;
+      }
+    }
+  });
+
+  // Déconnexion d'un utilisateur
   socket.on('disconnect', () => {
-    const roomId = socketToRoom[socket.id];
-    if (roomId && rooms[roomId]) {
-      socket.to(roomId).emit('user-left', socket.id, socketToName[socket.id]);
-      rooms[roomId] = rooms[roomId].filter(id => id !== socket.id);
-      io.to(roomId).emit('user-count', rooms[roomId].length);
-      delete socketToRoom[socket.id];
-      delete socketToName[socket.id];
-      delete micStatus[socket.id];
-      delete videoStatus[socket.id];
+    console.log(`Client déconnecté: ${socket.id}`);
+    
+    for (const room in rooms) {
+      if (rooms[room][socket.id]) {
+        const username = rooms[room][socket.id].name;
+        delete rooms[room][socket.id];
+
+        // Informer les autres utilisateurs
+        socket.to(room).emit('userLeft', { id: socket.id });
+
+        console.log(`${username} a quitté la salle ${room}`);
+
+        // Supprimer la salle si vide
+        if (Object.keys(rooms[room]).length === 0) {
+          delete rooms[room];
+        }
+        break;
+      }
     }
-    console.log(`Socket ${socket.id} déconnecté`);
   });
 });
 
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
+  console.log(`🚀 Serveur en écoute sur le port ${PORT}`);
 });
