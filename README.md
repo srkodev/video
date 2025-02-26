@@ -17,9 +17,9 @@ video
    │  ├─ robots.txt
    │  └─ static
    │     └─ js
-   │        ├─ main.a244c709.js
-   │        ├─ main.a244c709.js.LICENSE.txt
-   │        └─ main.a244c709.js.map
+   │        ├─ main.c96d30ef.js
+   │        ├─ main.c96d30ef.js.LICENSE.txt
+   │        └─ main.c96d30ef.js.map
    ├─ package-lock.json
    ├─ package.json
    ├─ public
